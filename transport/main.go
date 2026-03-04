@@ -15,7 +15,7 @@ func main() {
 	local := net.JoinHostPort(os.Getenv("SS_LOCAL_HOST"), os.Getenv("SS_LOCAL_PORT"))
 
 	if os.Getenv("SS_LOCAL_HOST") == "" {
-		log.Println("Error: No SIP003 env detected")
+		log.Println("No SIP003 env detected")
 		os.Exit(1)
 	}
 
