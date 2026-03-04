@@ -1,3 +1,23 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/plugin
+
+mkdir -p native
+mkdir -p app/src/main/jniLibs/arm64-v8a
+mkdir -p .github/workflows
+
+# Archivo C de ejemplo (reemplázalo luego por tu injector real)
+cat <<'CFILE' > native/simple_tls.c
+#include <stdio.h>
+
+int main() {
+    printf("simple-tls plugin started\n");
+    return 0;
+}
+CFILE
+
+# Workflow completo
+cat <<'YAML' > .github/workflows/android.yml
 name: Android Build
 
 on:
@@ -40,3 +60,10 @@ jobs:
         with:
           name: plugin-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+YAML
+
+git add .
+git commit -m "automatic native build system" || true
+git push
+
+echo "Todo listo. GitHub empezará a compilar automáticamente."
