@@ -1,3 +1,9 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -e
+
+cd ~/plugin
+
+cat <<'GRADLE' > app/build.gradle
 plugins {
     id 'com.android.application'
 }
@@ -38,3 +44,11 @@ dependencies {
     implementation 'com.github.shadowsocks:plugin:2.0.0'
 
 }
+GRADLE
+
+git add .
+git commit -m "fix ndk position for gradle 8" || true
+git push
+
+echo "Build restarted on GitHub Actions"
+
