@@ -23,7 +23,7 @@ jobs:
           mkdir -p app/src/main/jniLibs/arm64-v8a
           $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
           native/simple_tls.c \
-          -shared -fPIC \
+          -O2 -fPIE -pie -pthread \
           -o app/src/main/jniLibs/arm64-v8a/libsimple-tls.so
 
       - name: Setup Java

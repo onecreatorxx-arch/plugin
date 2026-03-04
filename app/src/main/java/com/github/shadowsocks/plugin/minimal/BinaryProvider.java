@@ -10,15 +10,17 @@ import java.io.File;
 
 public class BinaryProvider extends NativePluginProvider {
 
+    private static final String EXECUTABLE_NAME = "libsimple-tls.so";
+
     @Override
     public void populateFiles(PathProvider provider) {
-        provider.addPath("minimal", 0b111101101);
+        provider.addPath(EXECUTABLE_NAME, 0b111101101);
     }
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri) {
         try {
-            File file = new File(getContext().getApplicationInfo().nativeLibraryDir + "/libsimple-tls.so");
+            File file = new File(getContext().getApplicationInfo().nativeLibraryDir, EXECUTABLE_NAME);
             return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
         } catch (Exception e) {
             throw new RuntimeException(e);
