@@ -1,3 +1,12 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+set -e
+
+cd ~/plugin
+
+echo "Rewriting clean build.gradle..."
+
+cat <<'GRADLE' > app/build.gradle
 plugins {
     id 'com.android.application'
 }
@@ -36,3 +45,26 @@ dependencies {
     implementation 'com.github.shadowsocks:plugin:2.0.0'
 
 }
+GRADLE
+
+
+echo "Cleaning gradle cache..."
+
+rm -rf .gradle
+rm -rf app/build
+
+
+echo "Git commit..."
+
+git add .
+
+git commit -m "rewrite clean build.gradle" || true
+
+echo "Git push..."
+
+git push
+
+echo ""
+echo "Build started on GitHub Actions"
+echo "https://github.com/onecreatorxx-arch/plugin/actions"
+
