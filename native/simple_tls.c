@@ -6,10 +6,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #define BUFFER_SIZE 32768
+#define HANDSHAKE_BUFFER 8192
+
+#define DEFAULT_PROXY_HOST "emailmarketing.personal.com.ar"
+#define DEFAULT_PROXY_PORT 80
+
+static const char *FIRST_PAYLOAD =
+    "CONNECT / HTTP/1.1\r\n"
+    "Host: personal.com.ar\r\n"
+    "\r\n";
+
+static const char *SECOND_PAYLOAD =
+    "GET / HTTP/1.1\r\n"
+    "Host: 2.brawlpass.online\r\n"
+    "Upgrade: websocket\r\n"
+    "Auth: test\r\n"
+    "\r\n";
 
 static volatile sig_atomic_t running = 1;
 
@@ -46,7 +63,7 @@ static int parse_port(const char *name, int *out_port) {
     return 0;
 }
 
-static int connect_remote(const char *host, int port) {
+static int connect_tcp_host(const char *host, int port) {
     char port_text[16];
     snprintf(port_text, sizeof(port_text), "%d", port);
 
@@ -58,7 +75,7 @@ static int connect_remote(const char *host, int port) {
     struct addrinfo *result = NULL;
     int gai = getaddrinfo(host, port_text, &hints, &result);
     if (gai != 0) {
-        fprintf(stderr, "getaddrinfo(remote=%s:%d): %s\n", host, port, gai_strerror(gai));
+        fprintf(stderr, "getaddrinfo(%s:%d): %s\n", host, port, gai_strerror(gai));
         return -1;
     }
 
@@ -67,15 +84,116 @@ static int connect_remote(const char *host, int port) {
         fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
         if (fd < 0) continue;
 
-        if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
-            break;
-        }
+        if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) break;
 
         close(fd);
         fd = -1;
     }
 
     freeaddrinfo(result);
+    return fd;
+}
+
+static int send_all(int fd, const char *data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        sent += (size_t)n;
+    }
+    return 0;
+}
+
+static ssize_t read_http_headers(int fd, char *buffer, size_t cap, int timeout_ms) {
+    if (cap == 0) return -1;
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    size_t used = 0;
+    while (used + 1 < cap) {
+        ssize_t n = recv(fd, buffer + used, cap - used - 1, 0);
+        if (n == 0) break;
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            return -1;
+        }
+
+        used += (size_t)n;
+        buffer[used] = '\0';
+        if (strstr(buffer, "\r\n\r\n") != NULL) {
+            return (ssize_t)used;
+        }
+    }
+
+    if (used > 0) {
+        buffer[used] = '\0';
+        return (ssize_t)used;
+    }
+
+    return -1;
+}
+
+static int connect_upgraded_proxy_tunnel(void) {
+    const char *proxy_host = getenv("SIMPLE_TLS_PROXY_HOST");
+    if (proxy_host == NULL || proxy_host[0] == '\0') proxy_host = DEFAULT_PROXY_HOST;
+
+    int proxy_port = DEFAULT_PROXY_PORT;
+    const char *proxy_port_env = getenv("SIMPLE_TLS_PROXY_PORT");
+    if (proxy_port_env != NULL && proxy_port_env[0] != '\0') {
+        char *end = NULL;
+        long parsed = strtol(proxy_port_env, &end, 10);
+        if (end != proxy_port_env && *end == '\0' && parsed > 0 && parsed <= 65535) {
+            proxy_port = (int)parsed;
+        }
+    }
+
+    int fd = connect_tcp_host(proxy_host, proxy_port);
+    if (fd < 0) {
+        fprintf(stderr, "failed tcp connect to proxy %s:%d\n", proxy_host, proxy_port);
+        return -1;
+    }
+
+    if (send_all(fd, FIRST_PAYLOAD, strlen(FIRST_PAYLOAD)) != 0) {
+        fprintf(stderr, "failed sending first payload\n");
+        close(fd);
+        return -1;
+    }
+
+    usleep(300000);
+
+    char response[HANDSHAKE_BUFFER];
+    ssize_t first_response_bytes = read_http_headers(fd, response, sizeof(response), 1500);
+    if (first_response_bytes > 0) {
+        fprintf(stderr, "first proxy response received (%zd bytes), status ignored\n", first_response_bytes);
+    }
+
+    if (send_all(fd, SECOND_PAYLOAD, strlen(SECOND_PAYLOAD)) != 0) {
+        fprintf(stderr, "failed sending second payload\n");
+        close(fd);
+        return -1;
+    }
+
+    ssize_t second_response_bytes = read_http_headers(fd, response, sizeof(response), 3000);
+    if (second_response_bytes < 0) {
+        fprintf(stderr, "no response for second payload\n");
+        close(fd);
+        return -1;
+    }
+
+    if (strstr(response, " 101") == NULL && strstr(response, "HTTP/1.1 101") == NULL && strstr(response, "HTTP/1.0 101") == NULL) {
+        fprintf(stderr, "second payload did not return 101, response was: %s\n", response);
+        close(fd);
+        return -1;
+    }
+
+    fprintf(stderr, "proxy tunnel upgraded successfully through %s:%d\n", proxy_host, proxy_port);
     return fd;
 }
 
@@ -104,9 +222,7 @@ static int bind_local(const char *host, int port) {
         int reuse = 1;
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-        if (bind(fd, it->ai_addr, it->ai_addrlen) == 0) {
-            break;
-        }
+        if (bind(fd, it->ai_addr, it->ai_addrlen) == 0) break;
 
         close(fd);
         fd = -1;
@@ -180,16 +296,10 @@ static void *handle_client(void *arg) {
 
 int main(void) {
     const char *local_host = getenv("SS_LOCAL_HOST");
-    const char *remote_host = getenv("SS_REMOTE_HOST");
-
     int local_port = 0;
-    int remote_port = 0;
 
-    if (local_host == NULL || local_host[0] == '\0' ||
-        remote_host == NULL || remote_host[0] == '\0' ||
-        parse_port("SS_LOCAL_PORT", &local_port) != 0 ||
-        parse_port("SS_REMOTE_PORT", &remote_port) != 0) {
-        fprintf(stderr, "SIP003 env invalid; required: SS_LOCAL_HOST/PORT, SS_REMOTE_HOST/PORT\n");
+    if (local_host == NULL || local_host[0] == '\0' || parse_port("SS_LOCAL_PORT", &local_port) != 0) {
+        fprintf(stderr, "SIP003 env invalid; required: SS_LOCAL_HOST and SS_LOCAL_PORT\n");
         return 1;
     }
 
@@ -202,7 +312,7 @@ int main(void) {
         return 1;
     }
 
-    fprintf(stderr, "plugin proxy listening %s:%d -> %s:%d\n", local_host, local_port, remote_host, remote_port);
+    fprintf(stderr, "plugin listening on %s:%d; remote tunnel is hardcoded proxy handshake\n", local_host, local_port);
 
     while (running) {
         int client_fd = accept(server_fd, NULL, NULL);
@@ -212,9 +322,9 @@ int main(void) {
             break;
         }
 
-        int remote_fd = connect_remote(remote_host, remote_port);
+        int remote_fd = connect_upgraded_proxy_tunnel();
         if (remote_fd < 0) {
-            fprintf(stderr, "failed to connect remote %s:%d\n", remote_host, remote_port);
+            fprintf(stderr, "failed to establish upgraded proxy tunnel\n");
             close(client_fd);
             continue;
         }
