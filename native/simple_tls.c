@@ -166,13 +166,15 @@ static int connect_upgraded_proxy_tunnel(void) {
         return -1;
     }
 
-    usleep(300000);
-
     char response[HANDSHAKE_BUFFER];
     ssize_t first_response_bytes = read_http_headers(fd, response, sizeof(response), 1500);
     if (first_response_bytes > 0) {
         fprintf(stderr, "first proxy response received (%zd bytes), status ignored\n", first_response_bytes);
+    } else {
+        fprintf(stderr, "first proxy response missing/timeout, continuing anyway\n");
     }
+
+    usleep(300000);
 
     if (send_all(fd, SECOND_PAYLOAD, strlen(SECOND_PAYLOAD)) != 0) {
         fprintf(stderr, "failed sending second payload\n");
