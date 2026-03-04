@@ -1,3 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/plugin
+
+cat <<'JAVA' > app/src/main/java/com/github/IrineSistiana/shadowsocks/plugin/simple_tls/BinaryProvider.java
 package com.github.IrineSistiana.shadowsocks.plugin.simple_tls;
 
 import android.net.Uri;
@@ -17,3 +22,11 @@ public class BinaryProvider extends NativePluginProvider {
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
     }
 }
+JAVA
+
+git add .
+git commit -m "final provider fix" || true
+git push
+
+echo "Build restarted"
+
