@@ -1,0 +1,22 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "com.github.IrineSistiana.shadowsocks.plugin"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.github.IrineSistiana.shadowsocks.plugin"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
