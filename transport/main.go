@@ -1,40 +1,50 @@
 package main
 
 import (
-	"flag"
-	"log"
-	"net"
-	"os"
+"io"
+"log"
+"net"
+"os"
 )
+
+func relay(a net.Conn, b net.Conn) {
+go io.Copy(a, b)
+io.Copy(b, a)
+a.Close()
+b.Close()
+}
 
 func main() {
 
-	flag.CommandLine.Parse(os.Args[1:])
+localHost := os.Getenv("SS_LOCAL_HOST")
+localPort := os.Getenv("SS_LOCAL_PORT")
+remoteHost := os.Getenv("SS_REMOTE_HOST")
+remotePort := os.Getenv("SS_REMOTE_PORT")
 
-	remote := os.Getenv("SS_REMOTE_HOST") + ":" + os.Getenv("SS_REMOTE_PORT")
-	local := net.JoinHostPort(os.Getenv("SS_LOCAL_HOST"), os.Getenv("SS_LOCAL_PORT"))
-
-	if os.Getenv("SS_LOCAL_HOST") == "" {
-		log.Println("No SIP003 env detected")
-		os.Exit(1)
-	}
-
-if os.Getenv("SS_LOCAL_HOST") == "" {
-log.Println("No SIP003 env detected")
+if localHost == "" {
 os.Exit(1)
 }
-	log.Printf("Plugin activo | Local: %s | Remoto: %s", local, remote)
 
-	l, err := net.Listen("tcp", local)
-	if err != nil {
-		log.Fatal(err)
-	}
+localAddr := net.JoinHostPort(localHost, localPort)
+remoteAddr := net.JoinHostPort(remoteHost, remotePort)
 
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			continue
-		}
-		conn.Close()
-	}
+l, err := net.Listen("tcp", localAddr)
+if err != nil {
+log.Fatal(err)
+}
+
+for {
+client, err := l.Accept()
+if err != nil {
+continue
+}
+
+remote, err := net.Dial("tcp", remoteAddr)
+if err != nil {
+client.Close()
+continue
+}
+
+go relay(client, remote)
+}
 }
