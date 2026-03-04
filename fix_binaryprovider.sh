@@ -1,3 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/plugin
+
+cat <<'JAVA' > app/src/main/java/com/github/shadowsocks/plugin/minimal/BinaryProvider.java
 package com.github.shadowsocks.plugin.minimal;
 
 import android.net.Uri;
@@ -25,3 +30,10 @@ public class BinaryProvider extends NativePluginProvider {
         }
     }
 }
+JAVA
+
+git add .
+git commit -m "fix BinaryProvider openFile signature"
+git push
+
+echo "BinaryProvider corregido. GitHub compilará nuevamente."
