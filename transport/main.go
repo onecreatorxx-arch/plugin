@@ -1,40 +1,37 @@
 package main
 
 import (
-"log"
-"net"
-"os"
-"os/signal"
-"syscall"
+	"flag"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
+	// Ignorar todos los flags que Shadowsocks intente pasar
+	flag.CommandLine.Parse(os.Args[1:]) 
 
-remoteHost := os.Getenv("SS_REMOTE_HOST")
-remotePort := os.Getenv("SS_REMOTE_PORT")
+	remote := os.Getenv("SS_REMOTE_HOST") + ":" + os.Getenv("SS_REMOTE_PORT")
+	local := net.JoinHostPort(os.Getenv("SS_LOCAL_HOST"), os.Getenv("SS_LOCAL_PORT"))
 
-localHost := os.Getenv("SS_LOCAL_HOST")
-localPort := os.Getenv("SS_LOCAL_PORT")
+	if os.Getenv("SS_LOCAL_HOST") == "" {
+		log.Println("Error: No se detectaron variables SIP003")
+		os.Exit(1)
+	}
 
-remote := remoteHost + ":" + remotePort
-local := net.JoinHostPort(localHost, localPort)
+	log.Printf("Plugin Activo | Local: %s | Remoto: %s", local, remote)
 
-log.Printf("Transport plugin iniciado")
-log.Printf("Local: %s", local)
-log.Printf("Remote: %s", remote)
+	// Crear el listener para que Shadowsocks detecte que el plugin "está listo"
+	l, err := net.Listen("tcp", local)
+	if err != nil {
+		log.Fatalf("Fallo al abrir puerto local: %v", err)
+	}
+	defer l.Close()
 
-listener, err := net.Listen("tcp", local)
-
-if err != nil {
-log.Printf("Error listener: %v", err)
-os.Exit(1)
-}
-
-defer listener.Close()
-
-sigCh := make(chan os.Signal, 1)
-
-signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-<-sigCh
+	// Mantener el proceso vivo
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
 }
