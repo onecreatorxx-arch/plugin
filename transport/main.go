@@ -19,6 +19,10 @@ func main() {
 		os.Exit(1)
 	}
 
+if os.Getenv("SS_LOCAL_HOST") == "" {
+log.Println("No SIP003 env detected")
+os.Exit(1)
+}
 	log.Printf("Plugin activo | Local: %s | Remoto: %s", local, remote)
 
 	l, err := net.Listen("tcp", local)
