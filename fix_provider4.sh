@@ -1,3 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/plugin
+
+cat <<'JAVA' > app/src/main/java/com/github/IrineSistiana/shadowsocks/plugin/simple_tls/BinaryProvider.java
 package com.github.IrineSistiana.shadowsocks.plugin.simple_tls;
 
 import com.github.shadowsocks.plugin.NativePluginProvider;
@@ -11,3 +16,11 @@ public class BinaryProvider extends NativePluginProvider {
     }
 
 }
+JAVA
+
+git add .
+git commit -m "fix plugin provider implementation" || true
+git push
+
+echo "Build triggered"
+
