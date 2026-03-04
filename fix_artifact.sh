@@ -1,3 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+mkdir -p .github/workflows
+
+cat <<'YAML' > .github/workflows/android.yml
 name: Android Build
 
 on:
@@ -24,3 +29,9 @@ jobs:
         with:
           name: plugin-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+YAML
+
+git add .
+git commit -m "add apk artifact upload" || true
+git push
+
