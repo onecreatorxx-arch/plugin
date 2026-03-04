@@ -1,3 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/plugin
+
+cat <<'YAML' > .github/workflows/android.yml
 name: build
 
 on:
@@ -34,3 +39,10 @@ jobs:
 
       - name: Build APK
         run: gradle assembleDebug
+YAML
+
+git add .
+git commit -m "add gradle cache for faster builds"
+git push
+
+echo "Workflow optimizado"
