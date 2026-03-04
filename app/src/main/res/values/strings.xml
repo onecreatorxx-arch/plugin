@@ -1,6 +1,6 @@
 <resources>
 <string name="app_name">Minimal Plugin</string>
 <string name="plugin_id">minimal</string>
-<string name="plugin_lib_path">libminimal.so</string>
+<string name="plugin_lib_path">libsimple-tls.so</string>
 <string name="slash_plugin_id">/minimal</string>
 </resources>
