@@ -1,3 +1,10 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+cd ~/plugin
+
+mkdir -p .github/workflows
+
+cat <<'YAML' > .github/workflows/android.yml
 name: build
 
 on:
@@ -22,3 +29,10 @@ jobs:
 
       - name: Build APK
         run: gradle assembleDebug
+YAML
+
+git add .
+git commit -m "fix github workflow build"
+git push
+
+echo "Workflow corregido y enviado a GitHub"
