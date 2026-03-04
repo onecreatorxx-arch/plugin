@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    namespace "com.github.shadowsocks.plugin.minimal"
 
     namespace 'com.github.IrineSistiana.shadowsocks.plugin'
     compileSdk 34
