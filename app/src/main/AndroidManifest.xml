@@ -23,13 +23,6 @@
                     android:path="/minimal"/>
             </intent-filter>
 
-            <intent-filter>
-                <action android:name="com.github.shadowsocks.plugin.ACTION_NATIVE_PLUGIN"/>
-                <data
-                    android:scheme="plugin"
-                    android:host="moe.nb4a"
-                    android:path="/minimal"/>
-            </intent-filter>
 
             <meta-data
                 android:name="com.github.shadowsocks.plugin.id"

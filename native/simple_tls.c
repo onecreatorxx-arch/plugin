@@ -30,14 +30,8 @@ static const char *SECOND_PAYLOAD =
 
 static volatile sig_atomic_t running = 1;
 
-struct conn_pair {
+struct client_arg {
     int client_fd;
-    int remote_fd;
-};
-
-struct relay_args {
-    int from_fd;
-    int to_fd;
 };
 
 static void handle_signal(int sig) {
@@ -127,9 +121,7 @@ static ssize_t read_http_headers(int fd, char *buffer, size_t cap, int timeout_m
 
         used += (size_t)n;
         buffer[used] = '\0';
-        if (strstr(buffer, "\r\n\r\n") != NULL) {
-            return (ssize_t)used;
-        }
+        if (strstr(buffer, "\r\n\r\n") != NULL) return (ssize_t)used;
     }
 
     if (used > 0) {
@@ -149,53 +141,38 @@ static int connect_upgraded_proxy_tunnel(void) {
     if (proxy_port_env != NULL && proxy_port_env[0] != '\0') {
         char *end = NULL;
         long parsed = strtol(proxy_port_env, &end, 10);
-        if (end != proxy_port_env && *end == '\0' && parsed > 0 && parsed <= 65535) {
-            proxy_port = (int)parsed;
-        }
+        if (end != proxy_port_env && *end == '\0' && parsed > 0 && parsed <= 65535) proxy_port = (int)parsed;
     }
 
     int fd = connect_tcp_host(proxy_host, proxy_port);
-    if (fd < 0) {
-        fprintf(stderr, "failed tcp connect to proxy %s:%d\n", proxy_host, proxy_port);
-        return -1;
-    }
+    if (fd < 0) return -1;
 
     if (send_all(fd, FIRST_PAYLOAD, strlen(FIRST_PAYLOAD)) != 0) {
-        fprintf(stderr, "failed sending first payload\n");
         close(fd);
         return -1;
     }
 
     char response[HANDSHAKE_BUFFER];
-    ssize_t first_response_bytes = read_http_headers(fd, response, sizeof(response), 1500);
-    if (first_response_bytes > 0) {
-        fprintf(stderr, "first proxy response received (%zd bytes), status ignored\n", first_response_bytes);
-    } else {
-        fprintf(stderr, "first proxy response missing/timeout, continuing anyway\n");
-    }
+    (void) read_http_headers(fd, response, sizeof(response), 1500);
 
     usleep(300000);
 
     if (send_all(fd, SECOND_PAYLOAD, strlen(SECOND_PAYLOAD)) != 0) {
-        fprintf(stderr, "failed sending second payload\n");
         close(fd);
         return -1;
     }
 
     ssize_t second_response_bytes = read_http_headers(fd, response, sizeof(response), 3000);
     if (second_response_bytes < 0) {
-        fprintf(stderr, "no response for second payload\n");
         close(fd);
         return -1;
     }
 
     if (strstr(response, " 101") == NULL && strstr(response, "HTTP/1.1 101") == NULL && strstr(response, "HTTP/1.0 101") == NULL) {
-        fprintf(stderr, "second payload did not return 101, response was: %s\n", response);
         close(fd);
         return -1;
     }
 
-    fprintf(stderr, "proxy tunnel upgraded successfully through %s:%d\n", proxy_host, proxy_port);
     return fd;
 }
 
@@ -211,10 +188,7 @@ static int bind_local(const char *host, int port) {
 
     struct addrinfo *result = NULL;
     int gai = getaddrinfo(host, port_text, &hints, &result);
-    if (gai != 0) {
-        fprintf(stderr, "getaddrinfo(local=%s:%d): %s\n", host, port, gai_strerror(gai));
-        return -1;
-    }
+    if (gai != 0) return -1;
 
     int fd = -1;
     for (struct addrinfo *it = result; it != NULL; it = it->ai_next) {
@@ -234,7 +208,6 @@ static int bind_local(const char *host, int port) {
 
     if (fd < 0) return -1;
     if (listen(fd, 128) < 0) {
-        perror("listen");
         close(fd);
         return -1;
     }
@@ -242,57 +215,54 @@ static int bind_local(const char *host, int port) {
     return fd;
 }
 
-static void *relay_one_direction(void *arg) {
-    struct relay_args *relay = (struct relay_args *)arg;
+static void *handle_client(void *arg) {
+    struct client_arg *ctx = (struct client_arg *)arg;
+    int client_fd = ctx->client_fd;
+    free(ctx);
+
     char buffer[BUFFER_SIZE];
 
-    while (1) {
-        ssize_t n = recv(relay->from_fd, buffer, sizeof(buffer), 0);
+    while (running) {
+        ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
         if (n == 0) break;
         if (n < 0) {
             if (errno == EINTR) continue;
             break;
         }
 
-        size_t sent_total = 0;
-        while (sent_total < (size_t)n) {
-            ssize_t s = send(relay->to_fd, buffer + sent_total, (size_t)n - sent_total, 0);
-            if (s < 0) {
-                if (errno == EINTR) continue;
-                goto done;
-            }
-            sent_total += (size_t)s;
+        int tunnel_fd = connect_upgraded_proxy_tunnel();
+        if (tunnel_fd < 0) break;
+
+        if (send_all(tunnel_fd, buffer, (size_t)n) != 0) {
+            close(tunnel_fd);
+            break;
         }
+
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 800000;
+        setsockopt(tunnel_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        while (1) {
+            ssize_t rn = recv(tunnel_fd, buffer, sizeof(buffer), 0);
+            if (rn == 0) break;
+            if (rn < 0) {
+                if (errno == EINTR) continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                break;
+            }
+
+            if (send_all(client_fd, buffer, (size_t)rn) != 0) {
+                close(tunnel_fd);
+                close(client_fd);
+                return NULL;
+            }
+        }
+
+        close(tunnel_fd);
     }
 
-done:
-    shutdown(relay->to_fd, SHUT_WR);
-    return NULL;
-}
-
-static void *handle_client(void *arg) {
-    struct conn_pair *pair = (struct conn_pair *)arg;
-
-    struct relay_args uplink = {.from_fd = pair->client_fd, .to_fd = pair->remote_fd};
-    struct relay_args downlink = {.from_fd = pair->remote_fd, .to_fd = pair->client_fd};
-
-    pthread_t up_thread;
-    pthread_t down_thread;
-
-    if (pthread_create(&up_thread, NULL, relay_one_direction, &uplink) != 0 ||
-        pthread_create(&down_thread, NULL, relay_one_direction, &downlink) != 0) {
-        close(pair->client_fd);
-        close(pair->remote_fd);
-        free(pair);
-        return NULL;
-    }
-
-    pthread_join(up_thread, NULL);
-    pthread_join(down_thread, NULL);
-
-    close(pair->client_fd);
-    close(pair->remote_fd);
-    free(pair);
+    close(client_fd);
     return NULL;
 }
 
@@ -300,52 +270,32 @@ int main(void) {
     const char *local_host = getenv("SS_LOCAL_HOST");
     int local_port = 0;
 
-    if (local_host == NULL || local_host[0] == '\0' || parse_port("SS_LOCAL_PORT", &local_port) != 0) {
-        fprintf(stderr, "SIP003 env invalid; required: SS_LOCAL_HOST and SS_LOCAL_PORT\n");
-        return 1;
-    }
+    if (local_host == NULL || local_host[0] == '\0' || parse_port("SS_LOCAL_PORT", &local_port) != 0) return 1;
 
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
 
     int server_fd = bind_local(local_host, local_port);
-    if (server_fd < 0) {
-        perror("bind_local");
-        return 1;
-    }
-
-    fprintf(stderr, "plugin listening on %s:%d; remote tunnel is hardcoded proxy handshake\n", local_host, local_port);
+    if (server_fd < 0) return 1;
 
     while (running) {
         int client_fd = accept(server_fd, NULL, NULL);
         if (client_fd < 0) {
             if (errno == EINTR) continue;
-            perror("accept");
             break;
         }
 
-        int remote_fd = connect_upgraded_proxy_tunnel();
-        if (remote_fd < 0) {
-            fprintf(stderr, "failed to establish upgraded proxy tunnel\n");
+        struct client_arg *ctx = (struct client_arg *)malloc(sizeof(struct client_arg));
+        if (ctx == NULL) {
             close(client_fd);
             continue;
         }
-
-        struct conn_pair *pair = (struct conn_pair *)malloc(sizeof(struct conn_pair));
-        if (pair == NULL) {
-            close(client_fd);
-            close(remote_fd);
-            continue;
-        }
-
-        pair->client_fd = client_fd;
-        pair->remote_fd = remote_fd;
+        ctx->client_fd = client_fd;
 
         pthread_t client_thread;
-        if (pthread_create(&client_thread, NULL, handle_client, pair) != 0) {
+        if (pthread_create(&client_thread, NULL, handle_client, ctx) != 0) {
             close(client_fd);
-            close(remote_fd);
-            free(pair);
+            free(ctx);
             continue;
         }
         pthread_detach(client_thread);
